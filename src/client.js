@@ -1,71 +1,64 @@
 import "./styles.css"
+import { CARDS } from "./cards.js"
 
-import selectSoundAudio from "./assets/select.wav"
+const app = document.getElementById("app") ?? document.body
 
-const board = document.getElementById("board")
-const playersSection = document.getElementById("playersSection")
-const selectSound = new Audio(selectSoundAudio)
+// Build UI once
+app.innerHTML = `
+  <div style="font-family:monospace;padding:10px">
+    <h3 id="phase"></h3>
+    <p id="money"></p>
+    <div id="auctionBox">
+      <p id="cardName"></p>
+      <p id="highBid"></p>
+      <p id="turnInfo"></p>
+      <div id="controls">
+        <input id="bid" type="number" min="1" value="1" style="width:60px">
+        <button id="bidBtn">Bid</button>
+        <button id="passBtn">Pass</button>
+      </div>
+    </div>
+    <pre id="last" style="font-size:10px"></pre>
+  </div>`
 
-let cellButtons, playerContainers
+const $ = (id) => document.getElementById(id)
 
-function initUI(cells, playerIds, players, yourPlayerId) {
-  cellButtons = cells.map((_, cellIndex) => {
-    const button = document.createElement("button")
-    button.addEventListener("click", () => Rune.actions.claimCell(cellIndex))
-    board.appendChild(button)
+// Attach listeners ONCE — they survive every state update
+$("bidBtn").addEventListener("click", () => {
+  Rune.actions.bid(parseInt($("bid").value, 10))
+})
+$("passBtn").addEventListener("click", () => {
+  Rune.actions.pass()
+})
 
-    return button
-  })
+Rune.initClient({
+  onChange: ({ game, yourPlayerId }) => {
+    const me = game.players[yourPlayerId]
+    $("phase").textContent = `Phase: ${game.phase}`
+    $("money").textContent = `My money: $${me.money} | My cards: ${me.cards.length}`
+    $("last").textContent = JSON.stringify(game.lastAuction)
 
-  playerContainers = playerIds.map((playerId, index) => {
-    const li = document.createElement("li")
-    li.setAttribute("player", index)
-    li.innerHTML = `<img src="${players[playerId].avatarUrl}" />
-           <span>${
-             players[playerId].displayName +
-             (players[playerId].playerId === yourPlayerId
-               ? `<br>${Rune.t("(You)")}`
-               : "")
-           }</span>`
-    playersSection.appendChild(li)
-
-    return li
-  })
-}
-
-function onChange({ game, players, yourPlayerId, action }) {
-  const { cells, playerIds, winCombo, lastMovePlayerId, freeCells } = game
-
-  if (!cellButtons) initUI(cells, playerIds, players, yourPlayerId)
-  if (lastMovePlayerId) board.classList.remove("initial")
-
-  // Set localized "tap to play" text
-  if (!lastMovePlayerId && cellButtons) {
-    cellButtons[4].setAttribute("data-text", Rune.t("tap to play"))
-  }
-
-  cellButtons.forEach((button, i) => {
-    button.setAttribute("player", playerIds.indexOf(cells[i]))
-    button.setAttribute(
-      "dim",
-      (winCombo && !winCombo.includes(i)) || (!freeCells && !winCombo)
-    )
-
-    if (cells[i] || lastMovePlayerId === yourPlayerId || winCombo) {
-      button.setAttribute("disabled", "")
-    } else {
-      button.removeAttribute("disabled")
+    if (game.phase !== "auction") {
+      $("auctionBox").style.display = "none"
+      return
     }
-  })
 
-  playerContainers.forEach((container, i) => {
-    container.setAttribute(
-      "your-turn",
-      playerIds[i] !== lastMovePlayerId && !winCombo && freeCells
-    )
-  })
+    const card = CARDS.find((c) => c.id === game.deck[game.currentCardIndex])
+    const myTurn = game.turnPlayerId === yourPlayerId
+    const secsLeft = Math.max(0, Math.ceil((game.turnDeadline - (game.now ?? 0)) / 1000))
 
-  if (action && action.name === "claimCell") selectSound.play()
-}
+    $("cardName").innerHTML = `Auction: <b>${card ? card.name : "-"}</b>`
+    $("highBid").textContent = `Highest bid: $${game.highestBid} ${game.highestBidderId === yourPlayerId ? "(you)"
+        : game.highestBidderId ? "(opponent)" : ""
+      }`
+    $("turnInfo").textContent = `⏱ ${secsLeft}s — ${myTurn ? "YOUR TURN" : "opponent's turn"}`
+    $("controls").style.display = myTurn ? "block" : "none"
 
-Rune.initClient({ onChange })
+    // Keep the input's minimum valid, but don't stomp what the user typed
+    const minBid = game.highestBid + 1
+    $("bid").min = minBid
+    if (parseInt($("bid").value, 10) < minBid || $("bid").value === "") {
+      $("bid").value = minBid
+    }
+  },
+})
